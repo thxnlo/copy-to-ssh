@@ -11,9 +11,11 @@ read.
 
 This tool runs in the tray and handles the transfer. When a screenshot is
 copied to your clipboard, it uploads it to your SSH host (streamed into
-`ssh "cat > file"`, nothing to install on the server) and replaces your
-clipboard with the remote path. Claude Code and Codex both treat a pasted
-image path as an attachment, so the flow is:
+`ssh "cat > file"`, nothing to install on the server) and puts the remote
+path on your clipboard alongside the image: terminals paste the path,
+image-aware apps (Paint, chats, docs) still paste the screenshot. Claude
+Code and Codex both treat a pasted image path as an attachment, so the
+flow is:
 
 1. `Win+Shift+S` as usual
 2. Click the "Screenshot captured" toast, or press `Ctrl+Alt+V`
@@ -61,6 +63,9 @@ Details:
   the selected host (opened at startup, reopened on demand), so a send is
   just the image bytes over the wire, with no per-send handshake.
 - `Ctrl+Alt+V` force-sends whatever image is on the clipboard, from any app.
+- *Pause* in the tray menu stops all uploads while you work with local
+  screenshots. `Ctrl+Alt+V` still sends while paused, and the pause resets
+  on restart.
 - Old clips are removed automatically: every upload deletes `clip-*.png`
   older than a day from the remote dir.
 - The clipboard watch is event-driven (`WM_CLIPBOARDUPDATE`), not polling,

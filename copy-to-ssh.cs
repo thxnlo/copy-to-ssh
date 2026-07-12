@@ -208,6 +208,8 @@ class MainForm : Form
     NotifyIcon tray;
     ToolStripMenuItem hostMenu, askItem;
     string lastHash = "";
+    bool paused;      // session-only: ignore clipboard while set (Ctrl+Alt+V still sends)
+    bool selfUpdate;  // our own clipboard write is about to echo back as WM_CLIPBOARDUPDATE
 
     public MainForm()
     {
@@ -239,8 +241,27 @@ class MainForm : Form
 
     void UpdateTooltip()
     {
-        string t = "copy-to-ssh → " + Config.Host;
+        string t = "copy-to-ssh → " + Config.Host + (paused ? "  (paused)" : "");
         tray.Text = t.Length > 63 ? t.Substring(0, 63) : t; // NotifyIcon.Text hard limit
+    }
+
+    // put the path AND the image on the clipboard: terminals paste the text,
+    // image-aware apps (Paint, chats, docs) still paste the screenshot
+    void SetClipboardPathAndImage(string remote, byte[] png)
+    {
+        try
+        {
+            using (var ms = new MemoryStream(png))
+            using (Image img = Image.FromStream(ms))
+            {
+                var d = new DataObject();
+                d.SetImage(img);
+                d.SetText(remote);
+                selfUpdate = true;
+                Clipboard.SetDataObject(d, true);
+            }
+        }
+        catch { selfUpdate = false; }
     }
 
     byte[] GetClipboardPng()
@@ -266,11 +287,21 @@ class MainForm : Form
 
     void OnClipboardChanged()
     {
+        if (selfUpdate)
+        {
+            // echo of our own image+text write: adopt the clipboard-round-tripped hash
+            // so dedupe keeps working, and don't treat it as a new screenshot
+            selfUpdate = false;
+            byte[] p = GetClipboardPng();
+            if (p != null) { lastHash = HashOf(p); lastSeenHash = lastHash; }
+            return;
+        }
+        if (paused) return;
         byte[] png = GetClipboardPng();
         if (png == null) return;
         string hash = HashOf(png);
         // snipping tool re-writes the image after we set the remote path, clobbering it — put the path back
-        if (hash == lastHash && lastRemote.Length > 0) { try { Clipboard.SetText(lastRemote); } catch { } return; }
+        if (hash == lastHash && lastRemote.Length > 0) { SetClipboardPathAndImage(lastRemote, png); return; }
         if (hash == lastSeenHash) return; // snipping tool / clipboard history fire duplicate updates for one image
         lastSeenHash = hash;
         if (Config.Mode == "auto") SendPng(png, hash);
@@ -301,7 +332,7 @@ class MainForm : Form
                 if (ok)
                 {
                     lastRemote = remote;
-                    Clipboard.SetText(remote);
+                    SetClipboardPathAndImage(remote, png);
                     tray.ShowBalloonTip(3000, "Sent to " + Config.Host, remote + "  — paste it in your SSH window", ToolTipIcon.Info);
                 }
                 else
@@ -331,6 +362,11 @@ class MainForm : Form
         askItem.Checked = Config.Mode != "auto";
         askItem.Click += delegate { Config.Mode = askItem.Checked ? "ask" : "auto"; Config.Save(); };
 
+        var pauseItem = new ToolStripMenuItem("Pause  (ignore screenshots)");
+        pauseItem.CheckOnClick = true;
+        pauseItem.Checked = paused;
+        pauseItem.Click += delegate { paused = pauseItem.Checked; UpdateTooltip(); };
+
         var send = new ToolStripMenuItem("Send clipboard image now  (Ctrl+Alt+V)");
         send.Click += delegate { lastHash = ""; SendNow(); };
         var settings = new ToolStripMenuItem("Settings...");
@@ -340,6 +376,7 @@ class MainForm : Form
 
         menu.Items.Add(hostMenu);
         menu.Items.Add(askItem);
+        menu.Items.Add(pauseItem);
         menu.Items.Add(send);
         menu.Items.Add(settings);
         menu.Items.Add(new ToolStripSeparator());
