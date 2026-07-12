@@ -209,7 +209,6 @@ class MainForm : Form
     ToolStripMenuItem hostMenu, askItem;
     string lastHash = "";
     bool paused;      // session-only: ignore clipboard while set (Ctrl+Alt+V still sends)
-    bool selfUpdate;  // our own clipboard write is about to echo back as WM_CLIPBOARDUPDATE
 
     public MainForm()
     {
@@ -257,11 +256,10 @@ class MainForm : Form
                 var d = new DataObject();
                 d.SetImage(img);
                 d.SetText(remote);
-                selfUpdate = true;
                 Clipboard.SetDataObject(d, true);
             }
         }
-        catch { selfUpdate = false; }
+        catch { }
     }
 
     byte[] GetClipboardPng()
@@ -287,15 +285,11 @@ class MainForm : Form
 
     void OnClipboardChanged()
     {
-        if (selfUpdate)
-        {
-            // echo of our own image+text write: adopt the clipboard-round-tripped hash
-            // so dedupe keeps working, and don't treat it as a new screenshot
-            selfUpdate = false;
-            byte[] p = GetClipboardPng();
-            if (p != null) { lastHash = HashOf(p); lastSeenHash = lastHash; }
-            return;
-        }
+        // only we ever put the remote path text on the clipboard, so text==lastRemote
+        // means this event is the echo of our own image+path write — ignore it.
+        // (must NOT re-hash the image here: it round-trips with different bytes, and
+        // adopting that hash broke rewrite detection → endless re-upload/toast loop)
+        try { if (lastRemote.Length > 0 && Clipboard.ContainsText() && Clipboard.GetText() == lastRemote) return; } catch { }
         if (paused) return;
         byte[] png = GetClipboardPng();
         if (png == null) return;
